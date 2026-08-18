@@ -208,3 +208,4 @@ To add a new provider (e.g. Gemini):
 3. Add its env vars to `.env.example`
 4. No changes required to `src/routes/chat.js` or the routing contract
 # PROMPT-03-PROVIDER-ROUTING-STACK-ARCHITECT
+# PROMPT-03-PROVIDER-ROUTING-STACK-ARCHITECT
