@@ -34,7 +34,6 @@ function publicProviderList() {
     implemented: p.implemented,
     enabled: p.enabled,
     configured: p.configured,
-    defaultModel: p.defaultModel,
   }));
 }
 

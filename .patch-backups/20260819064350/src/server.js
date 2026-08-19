@@ -4,7 +4,6 @@ const config = require('./lib/config');
 const logger = require('./lib/logger');
 const metaRoutes = require('./routes/meta');
 const chatRoutes = require('./routes/chat');
-const executeRoutes = require('./routes/execute');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -18,7 +17,6 @@ app.use((req, res, next) => {
 
 app.use('/', metaRoutes);
 app.use('/', chatRoutes);
-app.use('/', executeRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

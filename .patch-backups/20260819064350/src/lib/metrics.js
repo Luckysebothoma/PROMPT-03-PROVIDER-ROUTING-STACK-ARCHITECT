@@ -21,24 +21,6 @@ const chatRequestsFailedTotal = new client.Counter({
   registers: [register],
 });
 
-const executeRequestsTotal = new client.Counter({
-  name: 'execute_requests_total',
-  help: 'Total number of /v1/execute requests received',
-  registers: [register],
-});
-
-const executeRequestsSuccessTotal = new client.Counter({
-  name: 'execute_requests_success_total',
-  help: 'Total number of successful /v1/execute requests',
-  registers: [register],
-});
-
-const executeRequestsFailedTotal = new client.Counter({
-  name: 'execute_requests_failed_total',
-  help: 'Total number of failed /v1/execute requests',
-  registers: [register],
-});
-
 const providerRequestsTotal = new client.Counter({
   name: 'provider_requests_total',
   help: 'Total number of requests routed to a provider',
@@ -73,9 +55,6 @@ module.exports = {
   chatRequestsTotal,
   chatRequestsSuccessTotal,
   chatRequestsFailedTotal,
-  executeRequestsTotal,
-  executeRequestsSuccessTotal,
-  executeRequestsFailedTotal,
   providerRequestsTotal,
   providerRequestsSuccessTotal,
   providerRequestsFailedTotal,

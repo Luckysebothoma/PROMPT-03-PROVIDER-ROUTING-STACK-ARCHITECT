@@ -24,13 +24,6 @@ Stack 3 - Provider Router (:4405 -> container :8080)
 Stack 3 resolves `provider`, `model`, routing strategy, and request
 configuration, then executes the request against an implemented provider.
 
-Two contracts sit on top of this execution boundary: `POST /v1/chat` is the
-user-facing single-message contract, and `POST /v1/execute` is the
-provider-neutral execution contract consumed by upstream orchestration such
-as Stack 5, which selects the worker/provider/model and hands Stack 3 the
-execution request. Stack 5 owns *why* a model was selected; Stack 3 owns
-*how* it is actually executed.
-
 ## Directory structure
 
 ```
@@ -39,19 +32,15 @@ PROMPT-03-PROVIDER-ROUTING-STACK-ARCHITECT/
     server.js              Express app entrypoint
     routes/meta.js          /health /ready /dependencies /providers /help /metrics
     routes/chat.js           POST /v1/chat
-    routes/execute.js        POST /v1/execute (Stack 5 execution contract)
     lib/config.js            env-driven configuration
     lib/logger.js            structured JSON logging
     lib/metrics.js           Prometheus metrics
     lib/db.js                Postgres pool + request_log persistence
     lib/redisClient.js       Redis client + routing state
     lib/router.js            provider resolution strategy
-    lib/executionService.js  shared routing+execution+persistence for /v1/chat and /v1/execute
     providers/registry.js    provider registry (implemented/enabled/configured)
     providers/groq.js        Groq execution implementation
   db/init/001_init.sql       request_log table
-  tests/run-tests.js          infrastructure + real execution test suite
-  tests/e2e-execute.sh        real end-to-end /v1/execute curl test
   redis/redis.conf
   prometheus/prometheus.yml
   grafana/provisioning/...
@@ -107,8 +96,7 @@ Other commands:
 - `GET /providers` — provider registry state (no secrets exposed)
 - `GET /help` — endpoint + routing strategy summary
 - `GET /metrics` — Prometheus metrics
-- `POST /v1/chat` — route + execute a single-message chat request (user-facing contract)
-- `POST /v1/execute` — provider-neutral execution contract for upstream orchestration such as Stack 5 (structured `messages[]`)
+- `POST /v1/chat` — route + execute a chat request
 
 ## Provider routing
 
@@ -155,68 +143,6 @@ Strategy (deterministic, no load balancing yet):
 }
 ```
 
-## Execution API (/v1/execute)
-
-`POST /v1/execute` is the provider-neutral execution contract consumed by
-upstream orchestration such as Stack 5. Stack 5 already decided which
-worker/provider/model to use; Stack 3 validates the request, resolves the
-provider through the same routing layer as `/v1/chat`, executes it, and
-returns a normalized result. It is **not** an alias of `/v1/chat` — it
-requires structured `messages[]` instead of a single `message` string, and
-Stack 5 never needs to know provider-specific request/response formats.
-
-### Request
-
-```json
-{
-  "provider": "groq",
-  "model": "openai/gpt-oss-120b",
-  "messages": [
-    { "role": "system", "content": "You are a helpful assistant." },
-    { "role": "user", "content": "Hello" }
-  ],
-  "temperature": 0.7,
-  "max_tokens": 1000
-}
-```
-
-`provider` and `model` are optional; omitting `provider` (or sending
-`"auto"`) uses the same deterministic routing strategy as `/v1/chat`.
-
-### Success response
-
-```json
-{
-  "success": true,
-  "provider": "groq",
-  "model": "openai/gpt-oss-120b",
-  "response": "...",
-  "usage": {},
-  "request_id": "..."
-}
-```
-
-### Error response
-
-Same provider-neutral error contract as `/v1/chat`:
-
-```json
-{
-  "success": false,
-  "error": { "code": "MODEL_NOT_FOUND", "message": "Groq does not recognize model \\"...\\"" },
-  "request_id": "..."
-}
-```
-
-Error codes: `INVALID_REQUEST`, `PROVIDER_NOT_FOUND`, `PROVIDER_NOT_IMPLEMENTED`,
-`PROVIDER_NOT_CONFIGURED`, `PROVIDER_DISABLED`, `PROVIDER_UNAVAILABLE`,
-`MODEL_NOT_FOUND`, and provider-execution codes such as `PROVIDER_AUTH_FAILED`,
-`PROVIDER_RATE_LIMITED`, `UPSTREAM_TIMEOUT`, `PROVIDER_EXECUTION_FAILED`.
-
-`/v1/chat` and `/v1/execute` share the same routing, provider execution,
-response normalization, metrics, and `request_log` persistence via
-`src/lib/executionService.js` — no execution logic is duplicated between them.
-
 ## Groq configuration
 
 Set in `.env`:
@@ -234,12 +160,10 @@ If `GROQ_API_KEY` is missing, Groq shows as `configured: false` in
 ## Gemini (future provider)
 
 Gemini is declared in the registry (`enabled`, may be `configured`) but
-`implemented` is always `false` in Day 3. No execution is faked — both
-`/v1/chat` and `/v1/execute` return `PROVIDER_NOT_IMPLEMENTED` for
-`provider: "gemini"`, and automatic routing never selects it. Adding
+`implemented` is always `false` in Day 3. No execution is faked. Adding
 Gemini later means implementing `src/providers/gemini.js` with an
 `execute()` function and wiring it into `src/providers/registry.js` —
-the routing contract, `/v1/chat`, and `/v1/execute` do not change.
+the routing contract and `/v1/chat` API do not change.
 
 ## Testing
 
@@ -261,7 +185,6 @@ The script distinguishes:
 Metrics exposed at `GET /metrics` (Prometheus format):
 
 - `chat_requests_total`, `chat_requests_success_total`, `chat_requests_failed_total`
-- `execute_requests_total`, `execute_requests_success_total`, `execute_requests_failed_total`
 - `provider_requests_total`, `provider_requests_success_total`, `provider_requests_failed_total` (labeled by provider/model)
 - `provider_request_duration_seconds` (labeled by provider/model)
 
@@ -283,8 +206,6 @@ To add a new provider (e.g. Gemini):
 1. Create `src/providers/<name>.js` exporting `execute()` and `healthCheck()`
 2. Register it in `src/providers/registry.js` with `implemented: true`
 3. Add its env vars to `.env.example`
-4. No changes required to `src/routes/chat.js`, `src/routes/execute.js`,
-   `src/lib/executionService.js`, or the routing contract — and no changes
-   required in Stack 5.
+4. No changes required to `src/routes/chat.js` or the routing contract
 # PROMPT-03-PROVIDER-ROUTING-STACK-ARCHITECT
 # PROMPT-03-PROVIDER-ROUTING-STACK-ARCHITECT

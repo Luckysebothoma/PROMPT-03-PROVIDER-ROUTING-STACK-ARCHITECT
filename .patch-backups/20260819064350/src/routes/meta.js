@@ -56,8 +56,7 @@ router.get('/help', (req, res) => {
       'GET /providers': 'Provider registry state (no secrets)',
       'GET /help': 'This message',
       'GET /metrics': 'Prometheus metrics',
-      'POST /v1/chat': 'Route and execute a single-message chat request against a provider',
-      'POST /v1/execute': 'Provider-neutral execution contract for upstream orchestration (e.g. Stack 5): resolves provider/model, executes structured messages[], returns a normalized result',
+      'POST /v1/chat': 'Route and execute a chat request against a provider',
     },
     routing_strategy: [
       '1. Explicit provider',

@@ -15,21 +15,9 @@ client.on('error', (err) => {
 });
 
 let connected = false;
-const CONNECT_TIMEOUT_MS = 1500;
-
-// node-redis's default reconnectStrategy retries the *initial* connect()
-// indefinitely when Redis is unreachable. Without a bound here, any caller
-// (readiness checks, routing) would hang forever instead of failing fast -
-// e.g. GET /ready would never respond, and "auto" routing in
-// src/lib/router.js would never reach its documented fallback path.
 async function connect() {
   if (!connected) {
-    await Promise.race([
-      client.connect(),
-      new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Redis connect timed out')), CONNECT_TIMEOUT_MS);
-      }),
-    ]);
+    await client.connect();
     connected = true;
   }
   return client;

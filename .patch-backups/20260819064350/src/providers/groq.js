@@ -8,7 +8,7 @@ class ProviderError extends Error {
   }
 }
 
-async function execute({ message, model, temperature, instruction, messages: structuredMessages, max_tokens }) {
+async function execute({ message, model, temperature, instruction }) {
   const apiKey = config.providers.groq.apiKey;
   if (!apiKey) {
     throw new ProviderError('PROVIDER_NOT_CONFIGURED', 'Groq API key is not configured');
@@ -16,28 +16,11 @@ async function execute({ message, model, temperature, instruction, messages: str
 
   const chosenModel = model || config.providers.groq.defaultModel;
 
-  // Structured messages[] (from /v1/execute, or normalized by /v1/chat) take
-  // precedence. The legacy {message, instruction} shape is preserved for any
-  // direct callers that still use it.
-  let messages;
-  if (Array.isArray(structuredMessages) && structuredMessages.length > 0) {
-    messages = structuredMessages.map((m) => ({ role: m.role || 'user', content: m.content }));
-  } else {
-    messages = [];
-    if (instruction) {
-      messages.push({ role: 'system', content: instruction });
-    }
-    messages.push({ role: 'user', content: message });
+  const messages = [];
+  if (instruction) {
+    messages.push({ role: 'system', content: instruction });
   }
-
-  const requestBody = {
-    model: chosenModel,
-    messages,
-    temperature: typeof temperature === 'number' ? temperature : 0.3,
-  };
-  if (typeof max_tokens === 'number') {
-    requestBody.max_tokens = max_tokens;
-  }
+  messages.push({ role: 'user', content: message });
 
   let response;
   try {
@@ -47,13 +30,14 @@ async function execute({ message, model, temperature, instruction, messages: str
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify({
+        model: chosenModel,
+        messages,
+        temperature: typeof temperature === 'number' ? temperature : 0.3,
+      }),
       timeout: 20000,
     });
   } catch (err) {
-    if (err.type === 'request-timeout') {
-      throw new ProviderError('UPSTREAM_TIMEOUT', 'Groq request timed out');
-    }
     throw new ProviderError('PROVIDER_NETWORK_ERROR', `Failed to reach Groq: ${err.message}`);
   }
 
@@ -65,9 +49,6 @@ async function execute({ message, model, temperature, instruction, messages: str
     }
     if (response.status === 429) {
       throw new ProviderError('PROVIDER_RATE_LIMITED', 'Groq rate limit exceeded');
-    }
-    if (response.status === 404 || (response.status === 400 && /model/i.test(bodyText))) {
-      throw new ProviderError('MODEL_NOT_FOUND', `Groq does not recognize model "${chosenModel}"`);
     }
     throw new ProviderError('PROVIDER_EXECUTION_FAILED', `Groq returned status ${response.status}: ${bodyText.slice(0, 300)}`);
   }
