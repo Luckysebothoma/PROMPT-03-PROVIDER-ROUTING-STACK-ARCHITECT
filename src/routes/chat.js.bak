@@ -1,4 +1,3 @@
-// PATCH_MARKER_CHAT_ROUTE_V2
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const executionService = require('../lib/executionService');
@@ -34,20 +33,13 @@ router.post('/v1/chat', async (req, res) => {
   }
   messages.push({ role: 'user', content: message });
 
-  // Optional capability/intent hint (e.g. from an upstream classify layer).
-  // "intent" is accepted as an alias so callers that already send
-  // {"intent": "..."} don't need to rename the field.
-  const capability = body.capability || body.intent;
-
   try {
     const result = await executionService.runExecution({
       requestId,
       provider: body.provider,
       model: body.model,
-      capability,
       messages,
       temperature: body.temperature,
-      max_tokens: body.max_tokens,
     });
     metrics.chatRequestsSuccessTotal.inc();
 

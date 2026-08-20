@@ -1,9 +1,11 @@
+// PATCH_MARKER_REGISTRY_CAPABILITIES_V1
 const config = require('../lib/config');
 const groq = require('./groq');
+const gemini = require('./gemini');
 
 // Provider registry describing state: implemented / enabled / configured / healthy.
-// This mirrors the contract established by Stack 2's provider registry, extended
-// with an "implemented" flag and an execute() function for Stack 3 routing.
+// Each provider also carries a `models` catalog (model id -> capability tags)
+// so the router can pick a worker by capability/intent, not just by name.
 function buildRegistry() {
   return {
     groq: {
@@ -12,17 +14,19 @@ function buildRegistry() {
       enabled: config.providers.groq.enabled,
       configured: Boolean(config.providers.groq.apiKey),
       defaultModel: config.providers.groq.defaultModel,
+      models: config.providers.groq.models,
       execute: groq.execute,
       healthCheck: groq.healthCheck,
     },
     gemini: {
       name: 'gemini',
-      implemented: false, // NOT implemented in Day 3 - registry-only entry
+      implemented: config.providers.gemini.implemented,
       enabled: config.providers.gemini.enabled,
       configured: Boolean(config.providers.gemini.apiKey),
       defaultModel: config.providers.gemini.defaultModel,
-      execute: null,
-      healthCheck: async () => ({ healthy: false, reason: 'not_implemented' }),
+      models: config.providers.gemini.models,
+      execute: gemini.execute,
+      healthCheck: gemini.healthCheck,
     },
   };
 }
@@ -35,6 +39,10 @@ function publicProviderList() {
     enabled: p.enabled,
     configured: p.configured,
     defaultModel: p.defaultModel,
+    models: Object.entries(p.models || {}).map(([id, meta]) => ({
+      id,
+      capabilities: meta.capabilities || [],
+    })),
   }));
 }
 
@@ -48,4 +56,44 @@ function getProvider(name) {
   return reg[name] || null;
 }
 
-module.exports = { buildRegistry, publicProviderList, implementedAvailableProviders, getProvider };
+// Flat list of every (provider, model) pair the registry knows about,
+// regardless of current availability — used to answer "what could serve
+// this capability" (GET /capabilities) as well as to drive routing.
+function listWorkers() {
+  const reg = buildRegistry();
+  const workers = [];
+  for (const p of Object.values(reg)) {
+    if (!p.implemented) continue;
+    for (const [modelId, meta] of Object.entries(p.models || {})) {
+      workers.push({
+        provider: p.name,
+        model: modelId,
+        capabilities: meta.capabilities || [],
+        available: Boolean(p.enabled && p.configured),
+      });
+    }
+  }
+  return workers;
+}
+
+function workersForCapability(capability) {
+  return listWorkers().filter((w) => w.capabilities.includes(capability));
+}
+
+function allCapabilities() {
+  const set = new Set();
+  for (const w of listWorkers()) {
+    for (const c of w.capabilities) set.add(c);
+  }
+  return Array.from(set).sort();
+}
+
+module.exports = {
+  buildRegistry,
+  publicProviderList,
+  implementedAvailableProviders,
+  getProvider,
+  listWorkers,
+  workersForCapability,
+  allCapabilities,
+};

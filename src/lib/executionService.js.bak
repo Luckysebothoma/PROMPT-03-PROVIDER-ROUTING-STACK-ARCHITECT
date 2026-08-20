@@ -1,4 +1,4 @@
-// PATCH_MARKER_EXECUTION_SERVICE_V2
+// PATCH_MARKER_EXECUTION_SERVICE_V1
 // Shared execution service used by both /v1/chat and /v1/execute so that
 // provider routing, execution, normalization, logging, metrics and
 // persistence are not duplicated between the two HTTP contracts.
@@ -6,10 +6,6 @@
 // /v1/chat        -> builds a messages[] array from {message, instruction}
 // /v1/execute     -> passes messages[] directly (Stack 5 execution contract)
 // Both call runExecution() below and format their own HTTP response shape.
-//
-// V2 adds an optional `capability` (alias: `intent`) hint that lets callers
-// (e.g. an upstream classify layer) ask for "reasoning", "vision", "code",
-// etc. without naming a specific provider — see src/lib/router.js.
 const router_lib = require('./router');
 const logger = require('./logger');
 const metrics = require('./metrics');
@@ -48,37 +44,27 @@ function validateOptionalNumber(value, name) {
   }
 }
 
-function validateOptionalString(value, name) {
-  if (value !== undefined && value !== null && typeof value !== 'string') {
-    throw new ExecutionError('INVALID_REQUEST', `"${name}" must be a string when provided`, 400);
-  }
-}
-
 /**
- * Resolve a provider (and optionally a model, via capability routing),
- * execute the request against it, normalize the response, and record
- * metrics/logs/persistence. Throws ExecutionError (with .code and .status)
- * on any failure so callers can format their own HTTP error body.
+ * Resolve a provider, execute the request against it, normalize the
+ * response, and record metrics/logs/persistence. Throws ExecutionError
+ * (with .code and .status) on any failure so callers can format their
+ * own HTTP error body.
  */
-async function runExecution({ requestId, provider, model, capability, messages, temperature, max_tokens }) {
+async function runExecution({ requestId, provider, model, messages, temperature, max_tokens }) {
   validateMessages(messages);
   validateOptionalNumber(temperature, 'temperature');
   validateOptionalNumber(max_tokens, 'max_tokens');
-  validateOptionalString(capability, 'capability');
 
   const startedAt = Date.now();
   let selectedProvider;
-  let routedModel;
 
   try {
-    const routed = await router_lib.resolveProvider({ provider, model, capability });
-    selectedProvider = routed.provider;
-    routedModel = routed.model;
+    selectedProvider = await router_lib.resolveProvider({ provider, model });
   } catch (err) {
     const code = err.code || 'PROVIDER_UNAVAILABLE';
     logger.error({
       request_id: requestId, operation: 'route_resolution', success: false,
-      error_code: code, capability: capability || null, duration: Date.now() - startedAt,
+      error_code: code, duration: Date.now() - startedAt,
     });
     await db.recordRequest({
       requestId, provider: null, model: model || null, success: false,
@@ -87,7 +73,7 @@ async function runExecution({ requestId, provider, model, capability, messages, 
     throw new ExecutionError(code, err.message, 503);
   }
 
-  const resolvedModel = model || routedModel || selectedProvider.defaultModel;
+  const resolvedModel = model || selectedProvider.defaultModel;
   metrics.providerRequestsTotal.inc({ provider: selectedProvider.name, model: resolvedModel });
   const timer = metrics.providerRequestDurationSeconds.startTimer({
     provider: selectedProvider.name, model: resolvedModel,
@@ -103,7 +89,7 @@ async function runExecution({ requestId, provider, model, capability, messages, 
     const durationMs = Date.now() - startedAt;
     logger.info({
       request_id: requestId, provider: selectedProvider.name, model: resolvedModel,
-      capability: capability || null, operation: 'execute', duration: durationMs, success: true,
+      operation: 'execute', duration: durationMs, success: true,
     });
     await db.recordRequest({
       requestId, provider: selectedProvider.name, model: resolvedModel, success: true, durationMs,
@@ -124,7 +110,7 @@ async function runExecution({ requestId, provider, model, capability, messages, 
     const durationMs = Date.now() - startedAt;
     logger.error({
       request_id: requestId, provider: selectedProvider.name, model: resolvedModel,
-      capability: capability || null, operation: 'execute', duration: durationMs, success: false, error_code: code,
+      operation: 'execute', duration: durationMs, success: false, error_code: code,
     });
     await db.recordRequest({
       requestId, provider: selectedProvider.name, model: resolvedModel, success: false, errorCode: code, durationMs,
@@ -134,4 +120,4 @@ async function runExecution({ requestId, provider, model, capability, messages, 
   }
 }
 
-module.exports = { runExecution, validateMessages, validateOptionalNumber, validateOptionalString, ExecutionError };
+module.exports = { runExecution, validateMessages, validateOptionalNumber, ExecutionError };
