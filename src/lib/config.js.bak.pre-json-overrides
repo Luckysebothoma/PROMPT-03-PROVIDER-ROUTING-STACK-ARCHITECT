@@ -26,106 +26,6 @@ const GEMINI_MODELS = {
   'gemini-3.1-pro-preview': { capabilities: ['chat', 'reasoning', 'tool-use', 'long_context', 'multimodal'] },
 };
 
-// --- Optional JSON-driven overrides -----------------------------------------
-// AI_PROVIDERS_JSON / AI_MODELS_JSON / AI_CREDENTIALS_JSON let ops tune a
-// provider's model catalog, default model, priority/weight, and credential
-// rotation purely via .env — no code change needed to adjust defaults.
-//
-// Each JSON env is optional and independent, and applies PER PROVIDER ID:
-// if AI_MODELS_JSON has entries for "gemini" but not "groq", only gemini's
-// model catalog is overridden — groq keeps using GROQ_MODELS/GROQ_* env vars
-// above exactly as before. A provider id that isn't "groq" or "gemini" is
-// parsed but ignored (logged once) — registry.js only has execute()/
-// healthCheck() adapters for those two today; a third provider needs its
-// own adapter before these envs can make it live.
-function parseJsonArrayEnv(name) {
-  const raw = process.env[name];
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) throw new Error('not an array');
-    return parsed;
-  } catch (err) {
-    console.warn(`[config] ${name} is not a valid JSON array — ignoring (${err.message})`);
-    return [];
-  }
-}
-
-const AI_PROVIDERS_JSON = parseJsonArrayEnv('AI_PROVIDERS_JSON');
-const AI_MODELS_JSON = parseJsonArrayEnv('AI_MODELS_JSON');
-const AI_CREDENTIALS_JSON = parseJsonArrayEnv('AI_CREDENTIALS_JSON');
-
-for (const p of AI_PROVIDERS_JSON) {
-  if (p.id !== 'groq' && p.id !== 'gemini') {
-    console.warn(
-      `[config] AI_PROVIDERS_JSON has provider "${p.id}" but registry.js only ` +
-      `implements groq/gemini — ignoring until an execute() adapter exists for it.`
-    );
-  }
-}
-
-function jsonModelsForProvider(providerId) {
-  return AI_MODELS_JSON
-    .filter((m) => m.provider === providerId && m.enabled !== false)
-    .sort((a, b) => (b.priority || 0) - (a.priority || 0));
-}
-
-// Highest-priority enabled credential for `providerId` whose secret_env
-// actually resolves to a non-empty value. Returns undefined if
-// AI_CREDENTIALS_JSON has no entry for this provider at all — that's the
-// signal for applyJsonOverrides() to keep the provider's own apiKey default
-// (e.g. GEMINI_API_KEY) instead of treating it as "explicitly blank".
-function jsonApiKeyForProvider(providerId) {
-  const entry = AI_CREDENTIALS_JSON.find((c) => c.provider === providerId);
-  if (!entry) return undefined;
-  const candidates = (entry.credentials || [])
-    .filter((c) => c.enabled !== false)
-    .sort((a, b) => (b.priority || 0) - (a.priority || 0));
-  for (const cred of candidates) {
-    const value = process.env[cred.secret_env];
-    if (value) return value;
-  }
-  return ''; // entry exists but no credential resolved -> explicitly not configured
-}
-
-// Layers AI_MODELS_JSON / AI_PROVIDERS_JSON / AI_CREDENTIALS_JSON overrides
-// on top of one provider's hardcoded defaults. Any override this provider
-// doesn't have JSON for falls through unchanged.
-function applyJsonOverrides(providerId, hardcoded) {
-  let models = hardcoded.models;
-  let defaultModel = hardcoded.defaultModel;
-
-  const jsonModels = jsonModelsForProvider(providerId);
-  if (jsonModels.length > 0) {
-    models = {};
-    for (const m of jsonModels) {
-      models[m.model] = {
-        capabilities: m.capabilities || [],
-        // lifecycle values seen in the wild: "stable", "preview", "beta",
-        // "deprecated" — treat anything that isn't explicitly "stable" as
-        // preview-grade for the stability ranking in buildCapabilityRouting.
-        preview: Boolean(m.lifecycle) && m.lifecycle !== 'stable',
-        priority: m.priority,
-        weight: m.weight,
-        contextWindow: m.context_window,
-        maxCompletionTokens: m.max_completion_tokens,
-        modalities: m.modalities,
-      };
-    }
-    defaultModel = jsonModels[0].model; // already sorted by priority desc
-  }
-
-  const providerMeta = AI_PROVIDERS_JSON.find((p) => p.id === providerId);
-  const enabled = providerMeta ? providerMeta.enabled !== false : hardcoded.enabled;
-  const priority = providerMeta ? providerMeta.priority : undefined;
-  const weight = providerMeta ? providerMeta.weight : undefined;
-
-  const jsonApiKey = jsonApiKeyForProvider(providerId);
-  const apiKey = jsonApiKey !== undefined ? jsonApiKey : hardcoded.apiKey;
-
-  return { ...hardcoded, models, defaultModel, enabled, priority, weight, apiKey };
-}
-
 // --- Capability-based routing defaults --------------------------------------
 // Auto-routing (router.js) needs to know, for every capability tag that
 // actually appears in GROQ_MODELS/GEMINI_MODELS above, which provider (and
@@ -232,7 +132,7 @@ function buildCapabilityRouting(providersConfig) {
 }
 
 const providers = {
-  groq: applyJsonOverrides('groq', {
+  groq: {
     apiKey: process.env.GROQ_API_KEY || '',
     // llama-3.1-8b-instant / llama-3.3-70b-versatile were retired by Groq
     // (shutdown Aug 16, 2026) — openai/gpt-oss-20b is the recommended
@@ -242,8 +142,8 @@ const providers = {
     baseUrl: process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1',
     implemented: true,
     models: GROQ_MODELS,
-  }),
-  gemini: applyJsonOverrides('gemini', {
+  },
+  gemini: {
     apiKey: process.env.GEMINI_API_KEY || '',
     // gemini-1.5-flash is fully retired. gemini-3.6-flash is the current
     // GA workhorse (coding/agentic, good price/perf).
@@ -252,7 +152,7 @@ const providers = {
     baseUrl: process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta',
     implemented: true,
     models: GEMINI_MODELS,
-  }),
+  },
 };
 
 const capabilityRouting = buildCapabilityRouting(providers);
