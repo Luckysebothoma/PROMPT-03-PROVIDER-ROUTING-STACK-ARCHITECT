@@ -2,6 +2,8 @@
 .env.*
 !.env.example
 
+*.bak
+*_backup
 *.key
 *.pem
 *.pfx
