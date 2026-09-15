@@ -1,4 +1,4 @@
-// PATCH_MARKER_EXECUTION_SERVICE_V2
+// PATCH_MARKER_EXECUTION_SERVICE_V3
 // Shared execution service used by both /v1/chat and /v1/execute so that
 // provider routing, execution, normalization, logging, metrics and
 // persistence are not duplicated between the two HTTP contracts.
@@ -11,11 +11,16 @@
 // (e.g. an upstream classify layer) ask for "reasoning", "vision", "code",
 // etc. without naming a specific provider — see src/lib/router.js.
 const router_lib = require('./router');
+const registry = require('../providers/registry');
+const redisClient = require('./redisClient');
 const logger = require('./logger');
 const metrics = require('./metrics');
 const db = require('./db');
 
 const N8N_COMFY_WEBHOOK_URL = process.env.N8N_COMFY_WEBHOOK_URL || null;
+
+// 0 (default) disables the internal daily token-usage throttle entirely.
+const DAILY_TOKEN_BUDGET = parseInt(process.env.DAILY_TOKEN_BUDGET || '0', 10);
 
 // Best-effort, non-blocking notify. Never throws, never awaited by callers.
 // n8n's Function node expects: { message, session_id, external_ref, title, detected_niche, variant_count }
@@ -150,6 +155,44 @@ async function runExecution({ requestId, provider, model, capability, messages, 
   }
 
   const resolvedModel = model || routedModel || selectedProvider.defaultModel;
+
+  // Cap/backfill max_tokens from the resolved model's configured ceiling
+  // (AI_MODELS_JSON `max_completion_tokens`, when set) so a missing
+  // max_tokens no longer silently falls through to the provider's own
+  // uncapped default, and an oversized caller-supplied value can't exceed
+  // what's actually configured for that model.
+  const modelMeta = registry.modelConfig(selectedProvider.name, resolvedModel);
+  const configuredCap = modelMeta && typeof modelMeta.maxCompletionTokens === 'number'
+    ? modelMeta.maxCompletionTokens
+    : undefined;
+  const effectiveMaxTokens = configuredCap !== undefined
+    ? (typeof max_tokens === 'number' ? Math.min(max_tokens, configuredCap) : configuredCap)
+    : max_tokens;
+
+  // Internal daily token budget throttle. Disabled by default
+  // (DAILY_TOKEN_BUDGET=0). Fails open if Redis is unreachable — throttling
+  // must never be the reason the whole gateway goes down.
+  if (DAILY_TOKEN_BUDGET > 0) {
+    let usedToday = 0;
+    try {
+      usedToday = await redisClient.getDailyTokenUsage();
+    } catch (err) {
+      logger.warn({ request_id: requestId, operation: 'token_budget_check', success: false, error_message: err.message });
+      usedToday = 0;
+    }
+    if (usedToday >= DAILY_TOKEN_BUDGET) {
+      logger.error({
+        request_id: requestId, operation: 'token_budget_throttle', success: false,
+        used_today: usedToday, daily_token_budget: DAILY_TOKEN_BUDGET,
+      });
+      await db.recordRequest({
+        requestId, provider: selectedProvider.name, model: resolvedModel, success: false,
+        errorCode: 'DAILY_TOKEN_BUDGET_EXCEEDED', durationMs: Date.now() - startedAt,
+      });
+      throw new ExecutionError('DAILY_TOKEN_BUDGET_EXCEEDED', `Daily token budget (${DAILY_TOKEN_BUDGET}) reached`, 429);
+    }
+  }
+
   metrics.providerRequestsTotal.inc({ provider: selectedProvider.name, model: resolvedModel });
   const timer = metrics.providerRequestDurationSeconds.startTimer({
     provider: selectedProvider.name, model: resolvedModel,
@@ -163,15 +206,25 @@ async function runExecution({ requestId, provider, model, capability, messages, 
       provider: selectedProvider.name,
       model: resolvedModel,
       temperature: temperature !== undefined ? temperature : null,
-      max_tokens: max_tokens !== undefined ? max_tokens : null,
+      max_tokens: effectiveMaxTokens !== undefined ? effectiveMaxTokens : null,
       messages: messages,
     });
 
     const result = await selectedProvider.execute({
-      messages, model: resolvedModel, temperature, max_tokens,
+      messages, model: resolvedModel, temperature, max_tokens: effectiveMaxTokens,
     });
     timer();
     metrics.providerRequestsSuccessTotal.inc({ provider: selectedProvider.name, model: resolvedModel });
+
+    // Best-effort daily token budget accounting — never blocks or fails the
+    // response to the caller.
+    if (DAILY_TOKEN_BUDGET > 0) {
+      const u = result.usage || {};
+      const usageTotal = Number(u.total_tokens) || (Number(u.prompt_tokens || 0) + Number(u.completion_tokens || 0)) || 0;
+      redisClient.addDailyTokenUsage(usageTotal).catch((err) => {
+        logger.warn({ request_id: requestId, operation: 'token_budget_record', success: false, error_message: err.message });
+      });
+    }
 
     const durationMs = Date.now() - startedAt;
     

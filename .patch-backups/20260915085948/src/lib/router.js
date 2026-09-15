@@ -1,8 +1,7 @@
-// PATCH_MARKER_ROUTER_CAPABILITIES_V3
+// PATCH_MARKER_ROUTER_CAPABILITIES_V2
 
 const registry = require('../providers/registry');
 const redisClient = require('./redisClient');
-const config = require('./config');
 
 class RoutingError extends Error {
   constructor(code, message) {
@@ -12,16 +11,27 @@ class RoutingError extends Error {
 }
 
 /**
- * Capability -> { providerName, model } defaults, sourced from config.js
- * (buildCapabilityRouting), which derives this from the actual model
- * catalogs (GROQ_MODELS / GEMINI_MODELS, or their AI_MODELS_JSON overrides)
- * instead of a hand-typed map. This is what makes
- * ROUTING_<CAPABILITY>_PROVIDER env vars (e.g. ROUTING_VISION_PROVIDER=groq)
- * and AI_MODELS_JSON-driven catalogs actually take effect at routing time —
- * this file previously had its own hardcoded chat/image-only map that
- * silently ignored both.
+ * Env-driven capability defaults. These give a deterministic, zero-Redis
+ * fast path for the two capabilities we care about most, while still
+ * falling through to the generic worker/round-robin logic for anything
+ * else (or if the preferred provider isn't actually usable right now).
+ *
+ *   chat  -> groq   (GROQ_DEFAULT_MODEL)
+ *   image -> gemini (GEMINI_DEFAULT_MODEL)
+ *
+ * Add more entries here as new capabilities/providers come online —
+ * no other code path needs to change.
  */
-const CAPABILITY_PROVIDER_DEFAULTS = config.routing.capabilityDefaults;
+const CAPABILITY_PROVIDER_DEFAULTS = {
+  chat: {
+    providerName: 'groq',
+    model: process.env.GROQ_DEFAULT_MODEL,
+  },
+  image: {
+    providerName: 'gemini',
+    model: process.env.GEMINI_DEFAULT_MODEL,
+  },
+};
 
 const DEFAULT_CAPABILITY = 'chat';
 

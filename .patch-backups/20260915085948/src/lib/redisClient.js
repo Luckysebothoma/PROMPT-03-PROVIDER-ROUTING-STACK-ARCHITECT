@@ -49,35 +49,4 @@ async function nextRoutingIndex(key, modulo) {
   return modulo > 0 ? val % modulo : 0;
 }
 
-// PATCH_MARKER_DAILY_TOKEN_BUDGET_V1
-// Internal daily token-usage counter, used by executionService to throttle
-// once DAILY_TOKEN_BUDGET (see .env.example) is reached for the day. Keyed
-// per UTC calendar day and self-expiring so it never needs a manual reset.
-function dailyUsageKey(date = new Date()) {
-  return `usage:tokens:${date.toISOString().slice(0, 10)}`;
-}
-
-async function getDailyTokenUsage() {
-  await connect();
-  const val = await client.get(dailyUsageKey());
-  return val ? parseInt(val, 10) : 0;
-}
-
-async function addDailyTokenUsage(amount) {
-  const n = Math.round(Number(amount) || 0);
-  if (n <= 0) return 0;
-  await connect();
-  const key = dailyUsageKey();
-  const total = await client.incrBy(key, n);
-  if (total === n) {
-    // First write for this key today — set a ~26h TTL so it self-cleans
-    // without a cron job, with margin past the UTC day boundary.
-    await client.expire(key, 26 * 60 * 60);
-  }
-  return total;
-}
-
-module.exports = {
-  client, connect, ping, nextRoutingIndex,
-  getDailyTokenUsage, addDailyTokenUsage,
-};
+module.exports = { client, connect, ping, nextRoutingIndex };

@@ -1,4 +1,4 @@
-// PATCH_MARKER_REGISTRY_CAPABILITIES_V1
+// PATCH_MARKER_REGISTRY_CAPABILITIES_V2
 const config = require('../lib/config');
 const groq = require('./groq');
 const gemini = require('./gemini');
@@ -42,6 +42,9 @@ function publicProviderList() {
     models: Object.entries(p.models || {}).map(([id, meta]) => ({
       id,
       capabilities: meta.capabilities || [],
+      maxCompletionTokens: typeof meta.maxCompletionTokens === 'number' ? meta.maxCompletionTokens : null,
+      contextWindow: typeof meta.contextWindow === 'number' ? meta.contextWindow : null,
+      preview: Boolean(meta.preview),
     })),
   }));
 }
@@ -69,6 +72,7 @@ function listWorkers() {
         provider: p.name,
         model: modelId,
         capabilities: meta.capabilities || [],
+        maxCompletionTokens: typeof meta.maxCompletionTokens === 'number' ? meta.maxCompletionTokens : null,
         available: Boolean(p.enabled && p.configured),
       });
     }
@@ -78,6 +82,17 @@ function listWorkers() {
 
 function workersForCapability(capability) {
   return listWorkers().filter((w) => w.capabilities.includes(capability));
+}
+
+// Full model metadata (capabilities, maxCompletionTokens, contextWindow,
+// preview, ...) for one resolved (provider, model) pair — lets callers like
+// executionService cap max_tokens against what's actually configured for
+// that model without re-deriving it from buildRegistry() themselves.
+function modelConfig(providerName, modelId) {
+  const reg = buildRegistry();
+  const p = reg[providerName];
+  if (!p || !p.models) return null;
+  return p.models[modelId] || null;
 }
 
 function allCapabilities() {
@@ -96,4 +111,5 @@ module.exports = {
   listWorkers,
   workersForCapability,
   allCapabilities,
+  modelConfig,
 };
