@@ -10,15 +10,20 @@ function bool(v, def = false) {
 // provider name. A model may carry more than one tag. Tags are intentionally
 // coarse-grained; refine per your own traffic once you have data.
 const GROQ_MODELS = {
-  'openai/gpt-oss-20b': { capabilities: ['chat', 'fast', 'general'] },
-  'openai/gpt-oss-120b': { capabilities: ['reasoning', 'code', 'complex', 'general'] },
-  'qwen/qwen3.6-27b': { capabilities: ['vision', 'multimodal', 'reasoning', 'chat'] },
+  'openai/gpt-oss-20b': { capabilities: ['chat', 'tool-use', 'fast'] },
+  'openai/gpt-oss-120b': { capabilities: ['chat', 'reasoning', 'code', 'tool-use'] },
+  // PREVIEW MODEL on Groq — eligible for evaluation only, not production;
+  // Groq can discontinue preview models without notice. Keep 'implemented: true'
+  // only if your router has a fallback path when this one disappears.
+  'qwen/qwen3.6-27b': { capabilities: ['chat', 'vision', 'multimodal', 'reasoning', 'code', 'tool-use'], preview: true },
 };
 
 const GEMINI_MODELS = {
-  'gemini-3.5-flash-lite': { capabilities: ['fast', 'classification', 'chat'] },
-  'gemini-3.6-flash': { capabilities: ['chat', 'code', 'general', 'multimodal'] },
-  'gemini-3.1-pro': { capabilities: ['reasoning', 'complex', 'long_context', 'multimodal'] },
+  'gemini-3.5-flash-lite': { capabilities: ['chat', 'classification', 'tool-use', 'fast'] },
+  'gemini-3.6-flash': { capabilities: ['chat', 'reasoning', 'tool-use', 'code', 'multimodal'] },
+  // NOTE: no free tier for this model in the Gemini API (Flash/Flash-Lite only
+  // are free). Route here only if your Gemini credential has billing enabled.
+  'gemini-3.1-pro-preview': { capabilities: ['chat', 'reasoning', 'tool-use', 'long_context', 'multimodal'] },
 };
 
 module.exports = {

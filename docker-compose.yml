@@ -1,19 +1,5 @@
 services:
 
-  redis:
-    image: redis:7-alpine
-    container_name: ${COMPOSE_PROJECT_NAME:-ai_gateway_3_of_10}_redis
-    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
-    volumes:
-      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
-      - redisdata:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    restart: unless-stopped
-
   api:
     build:
       context: .
@@ -26,9 +12,6 @@ services:
     networks:
       - ai_gateway_shared_net
       - databases
-    depends_on:
-      redis:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8080/health', r => process.exit(r.statusCode===200?0:1)).on('error', () => process.exit(1))"]
       interval: 10s

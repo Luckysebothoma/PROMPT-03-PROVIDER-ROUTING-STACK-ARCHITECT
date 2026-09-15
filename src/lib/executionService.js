@@ -15,6 +15,52 @@ const logger = require('./logger');
 const metrics = require('./metrics');
 const db = require('./db');
 
+const N8N_COMFY_WEBHOOK_URL = process.env.N8N_COMFY_WEBHOOK_URL || null;
+
+// Best-effort, non-blocking notify. Never throws, never awaited by callers.
+// n8n's Function node expects: { message, session_id, external_ref, title, detected_niche, variant_count }
+function notifyComfyWebhook({ requestId, message, detected_niche, variant_count, external_ref }) {
+  if (!N8N_COMFY_WEBHOOK_URL) return; // silently no-op if not configured
+  if (!message || !String(message).trim()) return; // n8n throws on empty message, so don't bother sending
+
+  const payload = {
+    message: String(message).trim(),
+    session_id: requestId,
+    external_ref: external_ref || null,
+    title: String(message).trim().slice(0, 60),
+    detected_niche: detected_niche || null,
+    variant_count: variant_count || null,
+  };
+
+  // Fire-and-forget: intentionally not awaited by the caller.
+  Promise.resolve()
+    .then(() => fetch(N8N_COMFY_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }))
+    .then((res) => {
+      if (!res.ok) {
+        logger.warn({
+          request_id: requestId,
+          operation: 'n8n_comfy_webhook',
+          success: false,
+          status: res.status,
+        });
+      }
+    })
+    .catch((err) => {
+      logger.warn({
+        request_id: requestId,
+        operation: 'n8n_comfy_webhook',
+        success: false,
+        error_message: err.message,
+      });
+    });
+}
+
+
+
 class ExecutionError extends Error {
   constructor(code, message, status) {
     super(message);
@@ -70,6 +116,21 @@ async function runExecution({ requestId, provider, model, capability, messages, 
   let selectedProvider;
   let routedModel;
 
+  // Log complete incoming payload data for tracing and debugging request issues
+  logger.info({
+    request_id: requestId,
+    operation: 'execution_start',
+    input_params: {
+      provider: provider || null,
+      model: model || null,
+      capability: capability || null,
+      temperature: temperature !== undefined ? temperature : null,
+      max_tokens: max_tokens !== undefined ? max_tokens : null,
+      messages_count: messages.length,
+    },
+    messages_payload: messages,
+  });
+
   try {
     const routed = await router_lib.resolveProvider({ provider, model, capability });
     selectedProvider = routed.provider;
@@ -79,6 +140,7 @@ async function runExecution({ requestId, provider, model, capability, messages, 
     logger.error({
       request_id: requestId, operation: 'route_resolution', success: false,
       error_code: code, capability: capability || null, duration: Date.now() - startedAt,
+      error_message: err.message,
     });
     await db.recordRequest({
       requestId, provider: null, model: model || null, success: false,
@@ -94,6 +156,17 @@ async function runExecution({ requestId, provider, model, capability, messages, 
   });
 
   try {
+    // Log outbound payload dispatched to provider API
+    logger.info({
+      request_id: requestId,
+      operation: 'provider_dispatch',
+      provider: selectedProvider.name,
+      model: resolvedModel,
+      temperature: temperature !== undefined ? temperature : null,
+      max_tokens: max_tokens !== undefined ? max_tokens : null,
+      messages: messages,
+    });
+
     const result = await selectedProvider.execute({
       messages, model: resolvedModel, temperature, max_tokens,
     });
@@ -101,13 +174,32 @@ async function runExecution({ requestId, provider, model, capability, messages, 
     metrics.providerRequestsSuccessTotal.inc({ provider: selectedProvider.name, model: resolvedModel });
 
     const durationMs = Date.now() - startedAt;
+    
+    // Log complete successful response data for debugging and inspection
     logger.info({
       request_id: requestId, provider: selectedProvider.name, model: resolvedModel,
-      capability: capability || null, operation: 'execute', duration: durationMs, success: true,
+      capability: capability || null, operation: 'execute_success', duration: durationMs, success: true,
+      usage: result.usage || {},
+      response_payload: result.response,
     });
     await db.recordRequest({
       requestId, provider: selectedProvider.name, model: resolvedModel, success: true, durationMs,
     });
+
+
+  // Best-effort side call — does not block or affect the response to the caller.
+    const responseText = typeof result.response === 'string'
+      ? result.response
+      : (result.response && (result.response.text || result.response.content)) || '';
+    notifyComfyWebhook({
+      requestId,
+      message: responseText,
+      detected_niche: capability || null,
+      variant_count: null,
+      external_ref: requestId,
+    });
+
+
 
     return {
       provider: selectedProvider.name,
@@ -122,9 +214,14 @@ async function runExecution({ requestId, provider, model, capability, messages, 
     metrics.providerRequestsFailedTotal.inc({ provider: selectedProvider.name, model: resolvedModel, error_code: code });
 
     const durationMs = Date.now() - startedAt;
+    
+    // Log complete error details including provider failure messages and payloads
     logger.error({
       request_id: requestId, provider: selectedProvider.name, model: resolvedModel,
-      capability: capability || null, operation: 'execute', duration: durationMs, success: false, error_code: code,
+      capability: capability || null, operation: 'execute_failure', duration: durationMs, success: false, error_code: code,
+      error_message: err.message,
+      error_stack: err.stack,
+      sent_messages: messages,
     });
     await db.recordRequest({
       requestId, provider: selectedProvider.name, model: resolvedModel, success: false, errorCode: code, durationMs,
