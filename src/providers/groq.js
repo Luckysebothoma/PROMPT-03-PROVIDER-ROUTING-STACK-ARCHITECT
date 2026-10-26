@@ -66,6 +66,9 @@ async function execute({ message, model, temperature, instruction, messages: str
     if (response.status === 429) {
       throw new ProviderError('PROVIDER_RATE_LIMITED', 'Groq rate limit exceeded');
     }
+    if (response.status >= 500) {
+      throw new ProviderError('PROVIDER_UPSTREAM_5XX', 'Groq returned a temporary server error');
+    }
     if (response.status === 404 || (response.status === 400 && /model/i.test(bodyText))) {
       throw new ProviderError('MODEL_NOT_FOUND', `Groq does not recognize model "${chosenModel}"`);
     }

@@ -154,7 +154,7 @@ async function runExecution({ requestId, provider, model, capability, messages, 
     throw new ExecutionError(code, err.message, 503);
   }
 
-  const resolvedModel = model || routedModel || selectedProvider.defaultModel;
+  let resolvedModel = model || routedModel || selectedProvider.defaultModel;
 
   // Cap/backfill max_tokens from the resolved model's configured ceiling
   // (AI_MODELS_JSON `max_completion_tokens`, when set) so a missing
@@ -165,7 +165,7 @@ async function runExecution({ requestId, provider, model, capability, messages, 
   const configuredCap = modelMeta && typeof modelMeta.maxCompletionTokens === 'number'
     ? modelMeta.maxCompletionTokens
     : undefined;
-  const effectiveMaxTokens = configuredCap !== undefined
+  let effectiveMaxTokens = configuredCap !== undefined
     ? (typeof max_tokens === 'number' ? Math.min(max_tokens, configuredCap) : configuredCap)
     : max_tokens;
 
@@ -194,7 +194,7 @@ async function runExecution({ requestId, provider, model, capability, messages, 
   }
 
   metrics.providerRequestsTotal.inc({ provider: selectedProvider.name, model: resolvedModel });
-  const timer = metrics.providerRequestDurationSeconds.startTimer({
+  let timer = metrics.providerRequestDurationSeconds.startTimer({
     provider: selectedProvider.name, model: resolvedModel,
   });
 
@@ -210,9 +210,83 @@ async function runExecution({ requestId, provider, model, capability, messages, 
       messages: messages,
     });
 
-    const result = await selectedProvider.execute({
-      messages, model: resolvedModel, temperature, max_tokens: effectiveMaxTokens,
-    });
+    let result;
+    try {
+      result = await selectedProvider.execute({
+        messages, model: resolvedModel, temperature, max_tokens: effectiveMaxTokens,
+      });
+    } catch (providerError) {
+      const failoverCodes = new Set([
+        'PROVIDER_RATE_LIMITED',
+        'UPSTREAM_TIMEOUT',
+        'PROVIDER_NETWORK_ERROR',
+        'PROVIDER_UPSTREAM_5XX',
+        'PROVIDER_AUTH_FAILED',
+      ]);
+      if (!failoverCodes.has(providerError.code)) throw providerError;
+
+      const failedProvider = selectedProvider;
+      const failedModel = resolvedModel;
+      const alternatives = registry.implementedAvailableProviders()
+        .filter((candidate) => candidate.name !== failedProvider.name);
+      const fallback = alternatives[0];
+      if (!fallback) throw providerError;
+
+      // Count and time the failed provider attempt independently.
+      timer();
+      metrics.providerRequestsFailedTotal.inc({
+        provider: failedProvider.name,
+        model: failedModel,
+        error_code: providerError.code || 'PROVIDER_EXECUTION_FAILED',
+      });
+      logger.warn({
+        request_id: requestId,
+        operation: 'provider_failover',
+        from_provider: failedProvider.name,
+        from_model: failedModel,
+        to_provider: fallback.name,
+        error_code: providerError.code,
+        error_message: providerError.message,
+      });
+
+      selectedProvider = fallback;
+      const capabilityWorker = capability
+        ? registry.workersForCapability(capability).find((worker) =>
+          worker.provider === fallback.name && worker.available)
+        : null;
+      // Never send a provider-specific model ID to another provider.
+      resolvedModel = model && registry.modelConfig(fallback.name, model)
+        ? model
+        : (capabilityWorker ? capabilityWorker.model : fallback.defaultModel);
+
+      const fallbackMeta = registry.modelConfig(fallback.name, resolvedModel);
+      const fallbackCap = fallbackMeta && typeof fallbackMeta.maxCompletionTokens === 'number'
+        ? fallbackMeta.maxCompletionTokens
+        : undefined;
+      effectiveMaxTokens = fallbackCap !== undefined
+        ? (typeof max_tokens === 'number' ? Math.min(max_tokens, fallbackCap) : fallbackCap)
+        : max_tokens;
+
+      metrics.providerRequestsTotal.inc({ provider: fallback.name, model: resolvedModel });
+      timer = metrics.providerRequestDurationSeconds.startTimer({
+        provider: fallback.name,
+        model: resolvedModel,
+      });
+      logger.info({
+        request_id: requestId,
+        operation: 'provider_dispatch',
+        provider: fallback.name,
+        model: resolvedModel,
+        failover: true,
+        temperature: temperature !== undefined ? temperature : null,
+        max_tokens: effectiveMaxTokens !== undefined ? effectiveMaxTokens : null,
+      });
+
+      // One failover attempt only: do not loop indefinitely between providers.
+      result = await fallback.execute({
+        messages, model: resolvedModel, temperature, max_tokens: effectiveMaxTokens,
+      });
+    }
     timer();
     metrics.providerRequestsSuccessTotal.inc({ provider: selectedProvider.name, model: resolvedModel });
 
