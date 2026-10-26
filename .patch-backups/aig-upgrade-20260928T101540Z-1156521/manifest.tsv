@@ -1,0 +1,11 @@
+M	.gitignore
+C	db/init/002_aig_ai_telemetry.sql
+C	src/lib/redact.js
+C	src/lib/keyPool.js
+C	src/lib/aiMetrics.js
+C	src/lib/telemetry.js
+C	src/lib/instrument.js
+M	src/providers/groq.js
+M	src/providers/gemini.js
+C	docs/AI_TELEMETRY.md
+M	.env.example

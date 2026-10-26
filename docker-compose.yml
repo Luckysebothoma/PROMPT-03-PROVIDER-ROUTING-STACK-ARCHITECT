@@ -10,8 +10,8 @@ services:
     ports:
       - "4405:8080"
     networks:
-      - ai_gateway_shared_net
       - databases
+      - obs-network
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8080/health', r => process.exit(r.statusCode===200?0:1)).on('error', () => process.exit(1))"]
       interval: 10s
@@ -28,7 +28,7 @@ volumes:
   grafanadata:
 
 networks:
-  ai_gateway_shared_net:
-    external: true
   databases:
+    external: true
+  obs-network:
     external: true

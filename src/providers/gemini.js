@@ -131,3 +131,6 @@ async function healthCheck() {
 }
 
 module.exports = { execute, healthCheck, ProviderError };
+
+// AIG_INSTRUMENT_V1: additive telemetry wrapper (guarded; no behaviour change if unavailable)
+try { const __aig = require('../lib/instrument'); if (module.exports && typeof module.exports.execute === 'function') module.exports.execute = __aig.wrap('gemini', module.exports.execute); } catch (_) { /* telemetry unavailable */ }

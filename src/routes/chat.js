@@ -1,4 +1,4 @@
-// PATCH_MARKER_CHAT_ROUTE_V2
+
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const executionService = require('../lib/executionService');
@@ -6,7 +6,7 @@ const metrics = require('../lib/metrics');
 
 const router = express.Router();
 
-router.post('/v1/chat', async (req, res) => {
+async function handleChat(req, res, forcedProvider = null) {
   const requestId = req.headers['x-request-id'] || uuidv4();
   res.setHeader('X-Request-ID', requestId);
 
@@ -19,36 +19,42 @@ router.post('/v1/chat', async (req, res) => {
     metrics.chatRequestsFailedTotal.inc();
     return res.status(400).json({
       success: false,
-      error: { code: 'INVALID_REQUEST', message: '"message" is required and must be a string' },
+      error: {
+        code: 'INVALID_REQUEST',
+        message: '"message" is required and must be a string',
+      },
       request_id: requestId,
     });
   }
 
-  // /v1/chat keeps its existing single-message contract, but internally
-  // normalizes to the same messages[] shape /v1/execute uses, and runs
-  // through the same shared routing/execution service so provider
-  // execution logic is not duplicated between the two endpoints.
   const messages = [];
-  if (body.instruction) {
-    messages.push({ role: 'system', content: body.instruction });
-  }
-  messages.push({ role: 'user', content: message });
 
-  // Optional capability/intent hint (e.g. from an upstream classify layer).
-  // "intent" is accepted as an alias so callers that already send
-  // {"intent": "..."} don't need to rename the field.
+  if (body.instruction) {
+    messages.push({
+      role: 'system',
+      content: body.instruction,
+    });
+  }
+
+  messages.push({
+    role: 'user',
+    content: message,
+  });
+
   const capability = body.capability || body.intent;
 
   try {
     const result = await executionService.runExecution({
       requestId,
-      provider: body.provider,
+      // Dedicated endpoints always use their designated provider.
+      provider: forcedProvider || body.provider,
       model: body.model,
       capability,
       messages,
       temperature: body.temperature,
       max_tokens: body.max_tokens,
     });
+
     metrics.chatRequestsSuccessTotal.inc();
 
     return res.status(200).json({
@@ -62,13 +68,28 @@ router.post('/v1/chat', async (req, res) => {
     });
   } catch (err) {
     metrics.chatRequestsFailedTotal.inc();
-    const code = err.code || 'PROVIDER_EXECUTION_FAILED';
+
     return res.status(err.status || 502).json({
       success: false,
-      error: { code, message: err.message },
+      error: {
+        code: err.code || 'PROVIDER_EXECUTION_FAILED',
+        message: err.message,
+      },
       request_id: requestId,
     });
   }
-});
+}
+
+// Existing provider-neutral endpoint: behavior remains unchanged.
+router.post('/v1/chat', (req, res) => handleChat(req, res));
+
+// Dedicated provider endpoints.
+router.post('/v1/chat/groq', (req, res) =>
+  handleChat(req, res, 'groq')
+);
+
+router.post('/v1/chat/gemini', (req, res) =>
+  handleChat(req, res, 'gemini')
+);
 
 module.exports = router;

@@ -24,3 +24,6 @@ logs/
 *.db
 
 .DS_Store
+
+# AI gateway upgrade DB dumps (may contain data)
+.patch-backups/aig-upgrade-*/*.sql.gz

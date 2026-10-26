@@ -103,8 +103,10 @@ async function main() {
   const groq = providerList.find((p) => p.name === 'groq');
   const gemini = providerList.find((p) => p.name === 'gemini');
   ok('groq present in /providers', Boolean(groq));
-  ok('gemini present in /providers with implemented=false', Boolean(gemini) && gemini.implemented === false);
-
+  ok(
+    'gemini present in /providers with implemented=true',
+    Boolean(gemini) && gemini.implemented === true
+  );
   const groqConfigured = Boolean(groq && groq.configured);
   const model = groq && groq.defaultModel;
 
@@ -163,6 +165,20 @@ async function main() {
 
   const chatRejects = await request('POST', '/v1/chat', { messages: [{ role: 'user', content: 'hi' }] });
   ok('POST /v1/chat rejects messages[] (single "message" string contract preserved)', chatRejects.status === 400);
+
+  const groqRoute = await request('POST', '/v1/chat/groq', {});
+ok(
+  'POST /v1/chat/groq route is registered',
+  groqRoute.status === 400
+    && groqRoute.body?.error?.code === 'INVALID_REQUEST'
+);
+
+const geminiRoute = await request('POST', '/v1/chat/gemini', {});
+ok(
+  'POST /v1/chat/gemini route is registered',
+  geminiRoute.status === 400
+    && geminiRoute.body?.error?.code === 'INVALID_REQUEST'
+);
 
   console.log(`\n${pass} passed, ${fail} failed, ${skip} skipped`);
   if (fail > 0) process.exitCode = 1;

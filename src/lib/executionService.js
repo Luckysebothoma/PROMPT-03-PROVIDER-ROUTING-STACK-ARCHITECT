@@ -24,7 +24,11 @@ const DAILY_TOKEN_BUDGET = parseInt(process.env.DAILY_TOKEN_BUDGET || '0', 10);
 
 // Best-effort, non-blocking notify. Never throws, never awaited by callers.
 // n8n's Function node expects: { message, session_id, external_ref, title, detected_niche, variant_count }
-function notifyComfyWebhook({ requestId, message, detected_niche, variant_count, external_ref }) {
+//CHECK IF COMFY IS ACTICVE OON .ENV
+_ACTIVATE_COMFYUI_N8N = process.env.ACTIVATE_COMFYUI_N8N  || false;
+if (_ACTIVATE_COMFYUI_N8N) {
+  logger.info('ComfyUI n8n webhook notifications are enabled');
+  function notifyComfyWebhook({ requestId, message, detected_niche, variant_count, external_ref }) {
   if (!N8N_COMFY_WEBHOOK_URL) return; // silently no-op if not configured
   if (!message || !String(message).trim()) return; // n8n throws on empty message, so don't bother sending
 
@@ -63,7 +67,9 @@ function notifyComfyWebhook({ requestId, message, detected_niche, variant_count,
       });
     });
 }
-
+}else{
+  logger.info('ComfyUI n8n webhook notifications are disabled');
+}
 
 
 class ExecutionError extends Error {

@@ -71,6 +71,8 @@ router.get('/help', (req, res) => {
     service: config.serviceName,
     description: 'Day 3 - Provider Routing & Execution Stack',
     endpoints: {
+      'POST /v1/chat/groq': 'Execute a single-message chat request using Groq',
+      'POST /v1/chat/gemini': 'Execute a single-message chat request using Gemini',
       'GET /health': 'Liveness check',
       'GET /ready': 'Readiness check (postgres + redis)',
       'GET /dependencies': 'Dependency connectivity status',
