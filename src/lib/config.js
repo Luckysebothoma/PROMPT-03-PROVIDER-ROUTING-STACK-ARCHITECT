@@ -268,7 +268,7 @@ providers.ollama = applyJsonOverrides('ollama', {
   apiKey: '',
   defaultModel: process.env.OLLAMA_DEFAULT_MODEL || Object.keys(OLLAMA_MODELS)[0] || '',
   enabled: bool(process.env.OLLAMA_ENABLED, true),
-  baseUrl: (process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\\/$/, ''),
+  baseUrl: (process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/+$/, ''),
   implemented: true,
   models: OLLAMA_MODELS,
 });
