@@ -2,6 +2,7 @@
 const config = require('../lib/config');
 const groq = require('./groq');
 const gemini = require('./gemini');
+const ollama = require('./ollama');
 
 // Provider registry describing state: implemented / enabled / configured / healthy.
 // Each provider also carries a `models` catalog (model id -> capability tags)
@@ -27,6 +28,16 @@ function buildRegistry() {
       models: config.providers.gemini.models,
       execute: gemini.execute,
       healthCheck: gemini.healthCheck,
+    },
+    ollama: {
+      name: 'ollama',
+      implemented: config.providers.ollama.implemented,
+      enabled: config.providers.ollama.enabled,
+      configured: Boolean(config.providers.ollama.baseUrl && config.providers.ollama.defaultModel),
+      defaultModel: config.providers.ollama.defaultModel,
+      models: config.providers.ollama.models,
+      execute: ollama.execute,
+      healthCheck: ollama.healthCheck,
     },
   };
 }
