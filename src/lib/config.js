@@ -56,7 +56,7 @@ const AI_MODELS_JSON = parseJsonArrayEnv('AI_MODELS_JSON');
 const AI_CREDENTIALS_JSON = parseJsonArrayEnv('AI_CREDENTIALS_JSON');
 
 for (const p of AI_PROVIDERS_JSON) {
-  if (p.id !== 'groq' && p.id !== 'gemini') {
+  if (!['groq', 'gemini', 'ollama'].includes(p.id)) {
     console.warn(
       `[config] AI_PROVIDERS_JSON has provider "${p.id}" but registry.js only ` +
       `implements groq/gemini — ignoring until an execute() adapter exists for it.`
@@ -145,7 +145,7 @@ function applyJsonOverrides(providerId, hardcoded) {
 // An override is honored only if that provider actually has a model
 // advertising the capability; otherwise it's ignored (logged once at
 // startup) and PROVIDER_PRIORITY below decides instead.
-const PROVIDER_PRIORITY = ['groq', 'gemini'];
+const PROVIDER_PRIORITY = ['groq', 'gemini', 'ollama'];
 
 function envKeyForCapability(capability) {
   // tool-use -> ROUTING_TOOL_USE_PROVIDER, long_context -> ROUTING_LONG_CONTEXT_PROVIDER
@@ -254,6 +254,24 @@ const providers = {
     models: GEMINI_MODELS,
   }),
 };
+
+// Ollama exposes an OpenAI-compatible /v1/chat/completions endpoint.
+// Keep its model catalog explicit: only advertise models configured by the operator.
+const OLLAMA_MODELS = (process.env.OLLAMA_MODELS || '')
+  .split(',').map((s) => s.trim()).filter(Boolean)
+  .reduce((catalog, model) => {
+    catalog[model] = { capabilities: ['chat'] };
+    return catalog;
+  }, {});
+
+providers.ollama = applyJsonOverrides('ollama', {
+  apiKey: '',
+  defaultModel: process.env.OLLAMA_DEFAULT_MODEL || Object.keys(OLLAMA_MODELS)[0] || '',
+  enabled: bool(process.env.OLLAMA_ENABLED, true),
+  baseUrl: (process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\\/$/, ''),
+  implemented: true,
+  models: OLLAMA_MODELS,
+});
 
 const capabilityRouting = buildCapabilityRouting(providers);
 
