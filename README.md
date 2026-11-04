@@ -18,7 +18,7 @@ Stack 3 - Provider Router (:4405 -> container :8080)
   |
   +----> Groq (implemented)
   |
-  +----> Gemini (registry-only, not implemented)
+  +----> Gemini (implemented when configured)\n  |\n  +----> Ollama (local, OpenAI-compatible API)
 ```
 
 Stack 3 resolves `provider`, `model`, routing strategy, and request
@@ -230,6 +230,46 @@ GROQ_ENABLED=true
 If `GROQ_API_KEY` is missing, Groq shows as `configured: false` in
 `GET /providers`, and any request routed to it fails gracefully with
 `PROVIDER_NOT_CONFIGURED`.
+
+## Ollama (local provider)
+
+Ollama is available as an optional Day 3 execution provider. It uses Ollama's
+OpenAI-compatible `/v1/chat/completions` endpoint, so the existing
+`/v1/chat` and `/v1/execute` contracts do not change. No API key is required.
+
+Set in Day 3's `.env`:
+
+```bash
+OLLAMA_ENABLED=true
+OLLAMA_BASE_URL=http://192.168.0.137:11434
+OLLAMA_DEFAULT_MODEL=<exact-model-name-from-ollama-list>
+# Optional comma-separated catalog used by capability routing:
+OLLAMA_MODELS=<model-a>,<model-b>
+OLLAMA_TIMEOUT_MS=120000
+```
+
+Use the Ollama host's reachable LAN address when Day 3 runs on another
+machine/container host. Do not use `localhost` from inside the Day 3
+container to reach a different host. If both containers share a Docker
+network, a service DNS name such as `http://llm:11434` is also suitable.
+
+Only models listed in `OLLAMA_MODELS` are advertised to capability routing;
+`OLLAMA_DEFAULT_MODEL` must be an exact installed model name. Verify it on
+the Ollama host with `ollama list`. The adapter checks availability via
+`GET /api/tags`, executes via `POST /v1/chat/completions`, normalizes token
+usage, and maps network/timeouts/model errors to the existing provider error
+contract. Ollama remains an optional provider; Groq/Gemini capability
+preferences retain precedence unless explicitly routed to Ollama.
+
+Example:
+
+```json
+{
+  "provider": "ollama",
+  "model": "<exact-installed-model>",
+  "messages": [{ "role": "user", "content": "Hello from local inference" }]
+}
+```
 
 ## Gemini (future provider)
 
