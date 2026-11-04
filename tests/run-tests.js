@@ -107,6 +107,19 @@ async function main() {
     'gemini present in /providers with implemented=true',
     Boolean(gemini) && gemini.implemented === true
   );
+  const ollama = providerList.find((p) => p.name === 'ollama');
+  ok('ollama present in /providers with implemented=true', Boolean(ollama) && ollama.implemented === true);
+  if (ollama && ollama.configured) {
+    const ollamaRes = await request('POST', '/v1/execute', {
+      provider: 'ollama',
+      model: ollama.defaultModel,
+      messages: [{ role: 'user', content: 'Reply with exactly: OLLAMA_EXECUTION_OK' }],
+    });
+    ok('POST /v1/execute real Ollama execution', ollamaRes.status === 200 && ollamaRes.body && ollamaRes.body.success === true && ollamaRes.body.provider === 'ollama', `status=${ollamaRes.status} body=${ollamaRes.raw.slice(0, 200)}`);
+  } else {
+    info('POST /v1/execute real Ollama execution (set OLLAMA_DEFAULT_MODEL to enable)');
+  }
+
   const groqConfigured = Boolean(groq && groq.configured);
   const model = groq && groq.defaultModel;
 
