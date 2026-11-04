@@ -70,7 +70,7 @@ PROMPT-03-PROVIDER-ROUTING-STACK-ARCHITECT/
 | GROQ_API_KEY | Groq API key (required for Groq execution) |
 | GROQ_DEFAULT_MODEL | Default Groq model (e.g. llama-3.1-8b-instant) |
 | GROQ_ENABLED | Enable/disable Groq provider |
-| GEMINI_API_KEY / GEMINI_DEFAULT_MODEL / GEMINI_ENABLED | Registry-only, not implemented |
+| GEMINI_API_KEY / GEMINI_DEFAULT_MODEL / GEMINI_ENABLED | Gemini API configuration |
 | GRAFANA_ADMIN_USER/PASSWORD | Grafana login |
 
 Copy `.env.example` to `.env` and fill in secrets. `.env` is never committed.
@@ -271,15 +271,11 @@ Example:
 }
 ```
 
-## Gemini (future provider)
+## Gemini provider
 
-Gemini is declared in the registry (`enabled`, may be `configured`) but
-`implemented` is always `false` in Day 3. No execution is faked — both
-`/v1/chat` and `/v1/execute` return `PROVIDER_NOT_IMPLEMENTED` for
-`provider: "gemini"`, and automatic routing never selects it. Adding
-Gemini later means implementing `src/providers/gemini.js` with an
-`execute()` function and wiring it into `src/providers/registry.js` —
-the routing contract, `/v1/chat`, and `/v1/execute` do not change.
+Gemini is implemented through `src/providers/gemini.js` and is available when
+`GEMINI_API_KEY` is configured. The normalized `/v1/chat` and `/v1/execute`
+contracts are shared with the other providers.
 
 ## Testing
 
